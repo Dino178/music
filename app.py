@@ -4,10 +4,11 @@ import os
 import random
 import sqlite3
 import time
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, redirect, render_template, request, send_from_directory, session
 import pylast
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "lastfm-player-secret-key-12345")
 
 # --- Environment Configuration ---
 API_KEY = os.environ.get("LASTFM_API_KEY", "")
@@ -43,7 +44,7 @@ def init_db():
                 album TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
+            """
         )
         conn.commit()
 
@@ -77,6 +78,53 @@ def stream_audio(filename):
     )
 
 
+# --- Authentication Helper Routes ---
+@app.route("/auth/lastfm")
+def auth_lastfm():
+    # Detect https behind Render's reverse proxy
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    callback_url = f"{scheme}://{host}/auth/callback"
+    
+    auth_url = f"https://www.last.fm/api/auth/?api_key={API_KEY}&cb={callback_url}"
+    return redirect(auth_url)
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    token = request.args.get("token")
+    if not token:
+        return "No token received from Last.fm", 400
+
+    try:
+        network = pylast.LastFMNetwork(api_key=API_KEY, api_secret=API_SECRET)
+        sg = pylast.SessionKeyGenerator(network)
+
+        # Exchange token directly for session key
+        session_key = sg.get_web_auth_session_key(request.url)
+
+        # Retrieve username attached to this session
+        user_network = pylast.LastFMNetwork(
+            api_key=API_KEY, api_secret=API_SECRET, session_key=session_key
+        )
+        username = user_network.get_authenticated_user().get_name()
+
+        return f"""
+        <html>
+        <body style="font-family: sans-serif; padding: 2rem; background: #121212; color: #fff;">
+            <h2 style="color: #00ff88;">Authorization Successful!</h2>
+            <p>Add these two values to your <strong>Render Dashboard &rarr; Environment</strong>:</p>
+            <p><strong>LASTFM_SESSION_KEY:</strong> <code>{session_key}</code></p>
+            <p><strong>LASTFM_USERNAME:</strong> <code>{username}</code></p>
+            <br>
+            <a href="/" style="color: #40c4ff;">Return to Player</a>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        return f"Error exchanging token: {str(e)}", 500
+
+
 # --- Library & Upload Endpoints ---
 @app.route("/api/upload", methods=["POST"])
 def upload_track():
@@ -91,7 +139,6 @@ def upload_track():
     title = request.form.get("title", "").strip() or "Untitled Track"
     album = request.form.get("album", "").strip()
 
-    # Sanitize and unique-ify filename
     clean_name = "".join(
         c for c in audio_file.filename if c.isalnum() or c in "._-"
     )
@@ -216,12 +263,9 @@ def get_billboard():
         net = get_network()
         user = net.get_user(USERNAME)
 
-        # 1. All-time top 25
         all_time = user.get_top_tracks(period=pylast.PERIOD_OVERALL, limit=25)
-        # 2. Past 7 days to compare velocity
         weekly = user.get_top_tracks(period=pylast.PERIOD_7DAYS, limit=50)
 
-        # Map weekly position: "artist - title" -> rank
         weekly_map = {}
         for rank, item in enumerate(weekly, 1):
             key = f"{item.item.artist.name.strip().lower()} - {item.item.title.strip().lower()}"
