@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Audio Scrobbler & Radio</title>
+  <style>
+    :root {
+      --bg: #0f111a;
+      --card-bg: #1a1d29;
+      --accent: #ba0000;
+      --accent-hover: #e01e1e;
+      --border: #2b2f42;
+      --text: #ffffff;
+      --muted: #8b92a5;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 20px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h1 span { color: var(--accent); }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .full-width { grid-column: 1 / -1; }
+
+    h2 {
+      font-size: 1.1rem;
+      margin-top: 0;
+      margin-bottom: 15px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+      color: #e5e9f0;
+    }
+
+    input, button, select {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #12141d;
+      color: #fff;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+    }
+
+    input:focus { outline: 1px solid var(--accent); }
+
+    button {
+      background: var(--accent);
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: var(--accent-hover); }
+
+    .btn-secondary {
+      background: #2b2f42;
+      color: #e5e9f0;
+    }
+    .btn-secondary:hover { background: #3d435c; }
+
+    .btn-action {
+      width: auto;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      margin: 0 4px 0 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+
+    .badge {
+      font-weight: 700;
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .up { color: #00ff88; background: rgba(0,255,136,0.1); }
+    .down { color: #ff5252; background: rgba(255,82,82,0.1); }
+    .steady { color: #40c4ff; background: rgba(64,196,255,0.1); }
+    .cold { color: var(--muted); background: rgba(255,255,255,0.05); }
+
+    .radio-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .radio-box input { width: auto; margin: 0; }
+
+    #activeTrackBanner {
+      font-size: 0.85rem;
+      color: #40c4ff;
+      margin-bottom: 8px;
+      min-height: 1.2rem;
+    }
+
+    #paceDisplay {
+      background: #12141d;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <h1><span>Last.fm</span> Player & Stats Workbench</h1>
+
+  <div class="container">
+    <!-- Upload Audio -->
+    <div class="card">
+      <h2>1. Upload Audio & Tag Metadata</h2>
+      <input type="file" id="fileInput" accept="audio/*">
+      <input type="text" id="artistInput" placeholder="Artist Name" required>
+      <input type="text" id="titleInput" placeholder="Track Title" required>
+      <input type="text" id="albumInput" placeholder="Album (Optional)">
+      <button onclick="handleUpload()">Upload & Add to Player</button>
+    </div>
+
+    <!-- Manual / Quick Scrobble -->
+    <div class="card">
+      <h2>2. Instant Scrobble (No Play Required)</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin-top:0;">Send a scrobble straight to your Last.fm profile immediately without listening.</p>
+      <input type="text" id="instantArtist" placeholder="Artist">
+      <input type="text" id="instantTitle" placeholder="Track Title">
+      <input type="text" id="instantAlbum" placeholder="Album (Optional)">
+      <button onclick="handleInstantScrobble()">Send to Scrobble</button>
+    </div>
+
+    <!-- Now Playing, Audio Player, and Radio -->
+    <div class="card full-width">
+      <h2>Audio Stream & Radio</h2>
+      <div id="activeTrackBanner">No track selected</div>
+      <audio id="audioPlayer" controls style="width: 100%; margin-bottom: 12px;"></audio>
+      
+      <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+        <button class="btn-secondary" style="width: 180px;" onclick="playNextRadioTrack()">Next Radio Track</button>
+        <div class="radio-box">
+          <input type="checkbox" id="radioAutoPlay">
+          <label for="radioAutoPlay">Continuous Radio Mode (Auto-play next random song)</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Local Library -->
+    <div class="card full-width">
+      <h2>Your Uploaded Tracks</h2>
+      <table id="libraryTable">
+        <thead>
+          <tr>
+            <th>Artist</th><th>Title</th><th>Album</th><th style="width: 180px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- /Pace Calculator -->
+    <div class="card">
+      <h2>/pace Milestone Calculator</h2>
+      <div style="display: flex; gap: 8px;">
+        <input type="number" id="paceMilestone" value="100000" placeholder="Milestone Target">
+        <button class="btn-secondary" style="width: 130px;" onclick="fetchPace()">Calculate</button>
+      </div>
+      <div id="paceDisplay">Click "Calculate" to project milestone date...</div>
+    </div>
+
+    <!-- Billboard Movements -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+        <h2 style="margin: 0; border: none; padding: 0;">All-Time Billboard (7D Shift)</h2>
+        <button class="btn-secondary" style="width: 90px; padding: 4px 8px; font-size: 0.8rem;" onclick="fetchBillboard()">Refresh</button>
+      </div>
+      <table id="billboardTable">
+        <thead>
+          <tr>
+            <th>#</th><th>Track</th><th>Plays</th><th>Trend</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let activeTrack = null;
+    let hasScrobbledCurrent = false;
+    const player = document.getElementById('audioPlayer');
+
+    // Load library and Billboard on startup
+    window.onload = () => {
+      fetchLibrary();
+      fetchBillboard();
+      fetchPace();
+    };
+
+    // --- Upload ---
+    async function handleUpload() {
+      const file = document.getElementById('fileInput').files[0];
+      const artist = document.getElementById('artistInput').value.trim();
+      const title = document.getElementById('titleInput').value.trim();
+      const album = document.getElementById('albumInput').value.trim();
+
+      if (!file || !artist || !title) {
+        alert("Audio file, artist, and title are required.");
+        return;
+      }
+
+      const data = new FormData();
+      data.append('file', file);
+      data.append('artist', artist);
+      data.append('title', title);
+      data.append('album', album);
+
+      const res = await fetch('/api/upload', { method: 'POST', body: data });
+      if (res.ok) {
+        document.getElementById('fileInput').value = '';
+        document.getElementById('artistInput').value = '';
+        document.getElementById('titleInput').value = '';
+        document.getElementById('albumInput').value = '';
+        fetchLibrary();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Upload failed");
+      }
+    }
+
+    // --- Library Fetch & Render ---
+    async function fetchLibrary() {
+      const res = await fetch('/api/library');
+      const tracks = await res.json();
+      const tbody = document.querySelector('#libraryTable tbody');
+      tbody.innerHTML = '';
+
+      tracks.forEach(track => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${track.artist}</strong></td>
+          <td>${track.title}</td>
+          <td>${track.album || '<span style="color:var(--muted)">—</span>'}</td>
+          <td>
+            <button class="btn-action" onclick='playSong(${JSON.stringify(track)})'>Play</button>
+            <button class="btn-action btn-secondary" onclick='sendDirectScrobble("${track.artist}", "${track.title}", "${track.album}")'>Scrobble</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // --- Playback, Now Playing, and Scrobble ---
+    function playSong(track) {
+      activeTrack = track;
+      hasScrobbledCurrent = false;
+
+      document.getElementById('activeTrackBanner').innerText = `Now Playing: ${track.artist} — ${track.title}`;
+      player.src = track.url;
+      player.play();
+
+      // Submit Now Playing status to Last.fm
+      fetch('/api/now-playing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(track)
+      });
+    }
+
+    // Standard Last.fm rule: scrobble once user listens to 50% or 4 minutes
+    player.ontimeupdate = () => {
+      if (!hasScrobbledCurrent && activeTrack && player.duration > 0) {
+        if (player.currentTime >= Math.min(player.duration / 2, 240)) {
+          hasScrobbledCurrent = true;
+          sendDirectScrobble(activeTrack.artist, activeTrack.title, activeTrack.album);
+        }
+      }
+    };
+
+    player.onended = () => {
+      if (document.getElementById('radioAutoPlay').checked) {
+        playNextRadioTrack();
+      }
+    };
+
+    async function playNextRadioTrack() {
+      const res = await fetch('/api/radio/next');
+      if (res.ok) {
+        const track = await res.json();
+        playSong(track);
+      } else {
+        alert("Upload songs first to use the radio feature.");
+      }
+    }
+
+    // --- Scrobbling Commands ---
+    async function sendDirectScrobble(artist, title, album) {
+      const res = await fetch('/api/scrobble', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist, title, album })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        console.log(`[Scrobbled] ${artist} - ${title}`);
+      } else {
+        alert("Scrobble Error: " + data.error);
+      }
+    }
+
+    function handleInstantScrobble() {
+      const artist = document.getElementById('instantArtist').value.trim();
+      const title = document.getElementById('instantTitle').value.trim();
+      const album = document.getElementById('instantAlbum').value.trim();
+
+      if (!artist || !title) {
+        alert("Artist and track title are required.");
+        return;
+      }
+      sendDirectScrobble(artist, title, album);
+      document.getElementById('instantTitle').value = '';
+    }
+
+    // --- Stats: Billboard ---
+    async function fetchBillboard() {
+      const tbody = document.querySelector('#billboardTable tbody');
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">Loading Billboard...</td></tr>';
+
+      const res = await fetch('/api/billboard');
+      const data = await res.json();
+      tbody.innerHTML = '';
+
+      if (data.error) {
+        tbody.innerHTML = `<tr><td colspan="4" style="color:#ff5252">${data.error}</td></tr>`;
+        return;
+      }
+
+      data.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${item.rank}</strong></td>
+          <td>${item.artist} - <em>${item.track}</em></td>
+          <td>${item.plays}</td>
+          <td><span class="badge ${item.badge_class}">${item.status}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // --- Stats: /pace ---
+    async function fetchPace() {
+      const target = document.getElementById('paceMilestone').value || 100000;
+      const display = document.getElementById('paceDisplay');
+      display.innerText = 'Calculating velocity...';
+
+      const res = await fetch(`/api/pace?target=${target}`);
+      const data = await res.json();
+
+      if (data.error) {
+        display.innerHTML = `<span style="color:#ff5252">${data.error}</span>`;
+        return;
+      }
+
+      if (data.achieved) {
+        display.innerHTML = `<strong>Status:</strong> ${data.message} (${data.current.toLocaleString()} total scrobbles)`;
+        return;
+      }
+
+      display.innerHTML = `
+        <strong>Current Plays:</strong> ${data.current.toLocaleString()}<br>
+        <strong>Daily Velocity:</strong> ${data.daily_pace} plays/day<br>
+        <strong>Needed:</strong> ${data.needed.toLocaleString()} more plays<br>
+        <strong>Estimated Date:</strong> <span style="color:#00ff88; font-weight:bold;">${data.estimated_date}</span> (~${data.days_left} days)
+      `;
+    }
+  </script>
+</body>
+</html>
