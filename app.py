@@ -264,52 +264,94 @@ def get_billboard():
         net = get_network()
         user = net.get_user(USERNAME)
 
-        all_time = user.get_top_tracks(period=pylast.PERIOD_OVERALL, limit=25)
-        weekly = user.get_top_tracks(period=pylast.PERIOD_7DAYS, limit=50)
+        # 1. Fetch top 35 all-time tracks (buffer allows accurate delta if songs swap near cut-offs)
+        all_time_items = user.get_top_tracks(period=pylast.PERIOD_OVERALL, limit=35)
+        if not all_time_items:
+            return jsonify([])
 
-        weekly_map = {}
-        for rank, item in enumerate(weekly, 1):
-            key = f"{item.item.artist.name.strip().lower()} - {item.item.title.strip().lower()}"
-            weekly_map[key] = rank
+        # Normalization helper to prevent mismatch from tags/punctuation
+        def normalize_key(artist, title):
+            return "".join(c for c in f"{artist} {title}".lower() if c.isalnum())
 
-        billboard = []
-        for rank, item in enumerate(all_time, 1):
+        # Build current all-time standings
+        current_chart = []
+        for rank, item in enumerate(all_time_items, 1):
             art = item.item.artist.name
             trk = item.item.title
-            key = f"{art.strip().lower()} - {trk.strip().lower()}"
+            plays = int(item.weight)
+            current_chart.append({
+                "current_rank": rank,
+                "artist": art,
+                "track": trk,
+                "key": normalize_key(art, trk),
+                "plays": plays,
+                "daily_plays": 0
+            })
 
-            if key in weekly_map:
-                w_rank = weekly_map[key]
-                if w_rank < rank:
-                    delta = rank - w_rank
-                    status = f"▲ HOT (+{delta})"
-                    badge_class = "up"
-                elif w_rank > rank:
-                    delta = w_rank - rank
-                    status = f"▼ DOWN (-{delta})"
-                    badge_class = "down"
-                else:
-                    status = "▶ SAME"
-                    badge_class = "steady"
+        # 2. Fetch scrobbles from the last 24 hours
+        now = int(time.time())
+        one_day_ago = now - 86400
+
+        recent_tracks = user.get_recent_tracks(limit=200, time_from=one_day_ago, time_to=now)
+
+        # Count plays per track over the last 24 hours
+        daily_counts = {}
+        for r in recent_tracks:
+            # Skip tracks currently playing that have no timestamp
+            if getattr(r, "timestamp", None) is None:
+                continue
+            k = normalize_key(r.track.artist.name, r.track.title)
+            daily_counts[k] = daily_counts.get(k, 0) + 1
+
+        # 3. Reconstruct yesterday's play counts
+        yesterday_standings = []
+        for item in current_chart:
+            item["daily_plays"] = daily_counts.get(item["key"], 0)
+            yesterday_plays = item["plays"] - item["daily_plays"]
+            yesterday_standings.append({
+                "key": item["key"],
+                "yesterday_plays": yesterday_plays
+            })
+
+        # Rank yesterday's standings (higher plays = lower rank number)
+        yesterday_standings.sort(key=lambda x: x["yesterday_plays"], reverse=True)
+        yesterday_rank_map = {entry["key"]: rank for rank, entry in enumerate(yesterday_standings, 1)}
+
+        # 4. Generate final top 25 with accurate 24h position shifts
+        billboard = []
+        for item in current_chart[:25]:
+            today_rank = item["current_rank"]
+            prev_rank = yesterday_rank_map.get(item["key"], today_rank)
+
+            delta = prev_rank - today_rank
+
+            if delta > 0:
+                status = f"▲ +{delta}"
+                badge_class = "up"
+            elif delta < 0:
+                status = f"▼ {delta}"
+                badge_class = "down"
+            elif item["daily_plays"] > 0:
+                # Track didn't pass anyone, but gained plays today
+                status = f"🔥 +{item['daily_plays']} plays"
+                badge_class = "steady"
             else:
-                status = "— COLD"
+                status = "— STEADY"
                 badge_class = "cold"
 
-            billboard.append(
-                {
-                    "rank": rank,
-                    "artist": art,
-                    "track": trk,
-                    "plays": int(item.weight),
-                    "status": status,
-                    "badge_class": badge_class,
-                }
-            )
+            billboard.append({
+                "rank": today_rank,
+                "artist": item["artist"],
+                "track": item["track"],
+                "plays": item["plays"],
+                "daily_plays": item["daily_plays"],
+                "status": status,
+                "badge_class": badge_class,
+            })
 
         return jsonify(billboard)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # --- /pace Milestone Predictor ---
 @app.route("/api/pace", methods=["GET"])
