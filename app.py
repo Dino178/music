@@ -96,18 +96,19 @@ def auth_callback():
     if not token:
         return "No token received from Last.fm", 400
 
+    if not API_KEY or not API_SECRET:
+        return (
+            "Render is missing LASTFM_API_KEY or LASTFM_API_SECRET in Environment variables.",
+            500,
+        )
+
     try:
         network = pylast.LastFMNetwork(api_key=API_KEY, api_secret=API_SECRET)
-        sg = pylast.SessionKeyGenerator(network)
-
-        # Exchange token directly for session key
-        session_key = sg.get_web_auth_session_key(request.url)
-
-        # Retrieve username attached to this session
-        user_network = pylast.LastFMNetwork(
-            api_key=API_KEY, api_secret=API_SECRET, session_key=session_key
-        )
-        username = user_network.get_authenticated_user().get_name()
+        
+        # Call auth.getSession directly using the token query param
+        doc = pylast._Request(network, "auth.getSession", {"token": token}).execute()
+        session_key = doc.getElementsByTagName("key")[0].firstChild.data
+        username = doc.getElementsByTagName("name")[0].firstChild.data
 
         return f"""
         <html>
